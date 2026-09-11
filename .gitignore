@@ -1,0 +1,13 @@
+.env
+.env.*
+!.env.example
+.DS_Store
+
+# Foundry generated artifacts
+**/broadcast/
+**/cache/
+**/out/
+
+# Dependencies are installed by the receiving project
+**/lib/
+**/node_modules/
