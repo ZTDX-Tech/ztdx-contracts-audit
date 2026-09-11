@@ -138,7 +138,7 @@ interface IZtdxReserveVault {
     /// @return The total USDT balance (in USDT decimals)
     function vaultTokenBalance() external view returns (uint256);
 
-    /// @notice Set a referral code (user can set this directly)
+    /// @notice Set a referral code (user can set this directly, only before the first funding)
     /// @param code The referral code to set
     function bindAffiliateCode(bytes32 code) external;
 

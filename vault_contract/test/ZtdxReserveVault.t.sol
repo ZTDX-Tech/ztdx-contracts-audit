@@ -112,6 +112,28 @@ contract ZtdxReserveVaultTest is Test {
         _fundExpectingCode(carol, CODE_CAROL, bytes32(0));
     }
 
+    // ============ ZTD-11: referral attribution fixed at first funding ============
+
+    function test_FundAccount_LaterFundingDoesNotBindCode() public {
+        _fund(alice, 100e6);
+        _fundExpectingCode(alice, CODE_CAROL, bytes32(0));
+        assertEq(registry.traderCodeOf(alice), bytes32(0));
+    }
+
+    function test_BindAffiliateCode_BeforeFundingBinds() public {
+        vm.prank(alice);
+        vault.bindAffiliateCode(CODE_CAROL);
+        assertEq(registry.traderCodeOf(alice), CODE_CAROL);
+    }
+
+    function test_BindAffiliateCode_AfterFundingReverts() public {
+        _fund(alice, 100e6);
+        vm.prank(alice);
+        vm.expectRevert(ZtdxReserveVault.AffiliateBindingClosed.selector);
+        vault.bindAffiliateCode(CODE_CAROL);
+        assertEq(registry.traderCodeOf(alice), bytes32(0));
+    }
+
     // ============ ZTD-04: releases above principal are bounded ============
 
     function test_ReleaseFunds_WithinPrincipalDoesNotConsumeExcessAllowance() public {

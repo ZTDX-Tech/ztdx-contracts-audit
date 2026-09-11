@@ -127,6 +127,9 @@ contract ZtdxReserveVault is
     /// @notice Thrown when the amount released above principal exceeds the remaining window allowance
     error ExcessReleaseAboveWindowLimit(uint256 excess, uint256 remaining);
 
+    /// @notice Thrown when binding a referral code after the account has been funded
+    error AffiliateBindingClosed();
+
     // ==================== Initialization ====================
 
     constructor() {
@@ -224,15 +227,20 @@ contract ZtdxReserveVault is
         settlementToken.safeTransferFrom(msg.sender, address(this), amount);
         uint256 actualAmount = settlementToken.balanceOf(address(this)) - balanceBefore;
 
+        // Referral attribution is fixed at the first funding
+        bool isFirstFunding = fundedTotals[msg.sender] == 0;
+
         // Update principal and cumulative fundAccount accounting
         _balances[msg.sender] += actualAmount;
         fundedTotals[msg.sender] += actualAmount;
         aggregateFunding += actualAmount;
 
-        // Set referral code if provided and not already set; emit the code actually bound in the registry
+        // Bind the referral code on the first funding only; emit the code actually bound in the registry
         bytes32 effectiveCode;
         if (referralCode != bytes32(0) && address(affiliateRegistry) != address(0)) {
-            effectiveCode = _setReferralCode(msg.sender, referralCode);
+            effectiveCode = isFirstFunding
+                ? _setReferralCode(msg.sender, referralCode)
+                : affiliateRegistry.traderCodeOf(msg.sender);
         }
 
         emit AccountFunded(msg.sender, actualAmount, effectiveCode);
@@ -394,9 +402,11 @@ contract ZtdxReserveVault is
 
     /**
      * @notice Set referral code (user can call this directly)
+     * @dev Only allowed before the account's first funding
      * @param code Referral code to set
      */
     function bindAffiliateCode(bytes32 code) external override {
+        if (fundedTotals[msg.sender] != 0) revert AffiliateBindingClosed();
         _setReferralCode(msg.sender, code);
     }
 

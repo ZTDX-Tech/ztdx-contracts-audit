@@ -15,18 +15,16 @@ This repository contains the ZTDX contracts reviewed in the CertiK preliminary c
 
 ## How to review
 
-The history has two commits:
-
-1. **Baseline** — the contracts as audited. The three Arbitrum contracts and their interfaces and libraries match the verified sources byte for byte.
-2. **Remediation** — all code changes for the findings. Diff these two commits to see only the fixes.
+1. **Baseline** (first commit) — the contracts as audited. The three Arbitrum contracts and their interfaces and libraries match the verified sources byte for byte.
+2. **Remediation** (later commits) — all code changes for the findings. Diff the baseline commit against `main` to see only the fixes.
 
 ## Findings
 
 | ID | Severity | Resolution |
 |---|---|---|
-| ZTD-01 | Centralization | Operational: upgrade authority will move to a multisig behind a timelock; addresses will be provided. |
-| ZTD-02 | Centralization | Operational: same as ZTD-01. |
-| ZTD-03 | Centralization | Operational: same as ZTD-01. For signer compromise, see the ZTD-04 limits. |
+| ZTD-01 | Centralization | Acknowledged. |
+| ZTD-02 | Centralization | Acknowledged. |
+| ZTD-03 | Centralization | Acknowledged. The ZTD-04 limits bound the impact of a compromised signer. |
 | ZTD-04 | Medium | By design, with a new bound (see below). |
 | ZTD-05 | Minor | Pending: BSC `SpotVault` source to be provided. |
 | ZTD-06 | Minor | Fixed: `_setReferralCode` returns the code bound in the registry (zero if none), and `AccountFunded` emits that value. |
@@ -34,7 +32,7 @@ The history has two commits:
 | ZTD-08 | Minor | Fixed: `assignAffiliateTier` reverts with `TierNotConfigured` for tiers never set via `configureTier`. Tiers configured before the upgrade are recognized by a non-zero total rebate. |
 | ZTD-09 | Minor | Fixed: `batchSettleRewards` requires `users` to be strictly ascending, which rules out duplicates. |
 | ZTD-10 | Informational | Fixed: `setAffiliateRegistry` emits `AffiliateRegistryChanged(old, new)`. |
-| ZTD-11 | Informational | Pending: the business rule is under review. |
+| ZTD-11 | Informational | Fixed: a referral code can only be bound before or at the account's first funding. `fundAccount` binds only when `fundedTotals` was zero, and `bindAffiliateCode` reverts with `AffiliateBindingClosed` once the account has been funded. |
 | ZTD-12 | Discussion | Clarified: `aggregateReleases` is documented as user releases only; partner settlements are tracked in `partnerLedgerDebits`. |
 | ZTD-13 | Discussion | Fixed: `authorizeHandler` / `removeHandler` use `_grantRole` / `_revokeRole`, so `ADMIN_ROLE` alone can manage handlers. |
 | ZTD-14 | Discussion | Fixed: batch settlement advances each paid user's `rewardNonces`, which invalidates any outstanding `redeemReward` signature. |
