@@ -9,7 +9,7 @@ This repository contains the ZTDX contracts reviewed in the CertiK preliminary c
 | `ZtdxReserveVault` | Arbitrum One | `0x6be516b0f23ff267fb604cc2321b15d508c395a4` | `vault_contract/src/contracts/core/vault/ZtdxReserveVault.sol` |
 | `AffiliateRegistry` | Arbitrum One | `0x3e9d969118b0c73673ee8c99656b0e19776caf37` | `referral_storage_contract/src/contracts/referral/AffiliateRegistry.sol` |
 | `ZtdxRewardRouter` | Arbitrum One | `0x89ccd7c28223f4f6a3cd70af418be7a614c50707` | `rebate_contract/src/contracts/core/referral/ZtdxRewardRouter.sol` |
-| `SpotVault` | BNB Smart Chain | `0xcd3ee13d7ce9aacd13f778a1b1455c339e779543` | Not included yet (see ZTD-05) |
+| `SpotVault` | BNB Smart Chain | `0xcd3ee13d7ce9aacd13f778a1b1455c339e779543` | `spot_contract/src/SpotVault.sol` |
 
 `ZtdxSpotVault` in `vault_contract` is a separate implementation and is not the audited BSC `SpotVault`.
 
@@ -17,6 +17,8 @@ This repository contains the ZTDX contracts reviewed in the CertiK preliminary c
 
 1. **Baseline** (first commit) — the contracts as audited. The three Arbitrum contracts and their interfaces and libraries match the verified sources byte for byte.
 2. **Remediation** (later commits) — all code changes for the findings. Diff the baseline commit against `main` to see only the fixes.
+
+The BSC `SpotVault` was added later in its own commit, unchanged from the deployment. Built with the settings in `spot_contract/foundry.toml` and OpenZeppelin 5.0.2, its runtime bytecode matches the deployed contract exactly, metadata hash included (immutables masked). It is not a proxy.
 
 ## Findings
 
@@ -26,7 +28,7 @@ This repository contains the ZTDX contracts reviewed in the CertiK preliminary c
 | ZTD-02 | Centralization | Acknowledged. |
 | ZTD-03 | Centralization | Acknowledged. The ZTD-04 limits bound the impact of a compromised signer. |
 | ZTD-04 | Medium | By design, with a new bound (see below). |
-| ZTD-05 | Minor | Pending: BSC `SpotVault` source to be provided. |
+| ZTD-05 | Minor | Pending: the deployed source is now in `spot_contract/`; the fix will follow. |
 | ZTD-06 | Minor | Fixed: `_setReferralCode` returns the code bound in the registry (zero if none), and `AccountFunded` emits that value. |
 | ZTD-07 | Minor | Fixed: `setAffiliateRegistry` rejects the zero address in the Vault and the Router. |
 | ZTD-08 | Minor | Fixed: `assignAffiliateTier` reverts with `TierNotConfigured` for tiers never set via `configureTier`. Tiers configured before the upgrade are recognized by a non-zero total rebate. |
@@ -69,5 +71,7 @@ forge install --no-git OpenZeppelin/openzeppelin-contracts-upgradeable@v5.0.2
 forge build
 forge test
 ```
+
+`spot_contract` only needs `forge-std` and `openzeppelin-contracts@v5.0.2`.
 
 Compiler settings are in each `foundry.toml`: solc 0.8.20, optimizer 200 runs, evm `shanghai`.
