@@ -81,6 +81,9 @@ contract ZtdxRewardRouter is
     /// @notice Thrown when an owner attempts to settle the same batch twice
     error BatchAlreadySettled(uint256 batchId);
 
+    /// @notice Thrown when batch users are not strictly ascending, which also rules out duplicates
+    error UsersNotStrictlyAscending(uint256 index);
+
     /// @notice Thrown when domain name is empty
     error EmptyDomainName();
 
@@ -218,6 +221,8 @@ contract ZtdxRewardRouter is
     /**
      * @notice Batch sync rebates (admin only)
      * @dev Distributes rebates to multiple users in a single transaction
+     * @dev Users must be strictly ascending by address; each paid user's reward nonce is advanced
+     *      so that any outstanding redeemReward signature can no longer be used
      * @param users Array of user addresses
      * @param amounts Array of rebate amounts (6 decimals)
      * @param batchId Batch ID for tracking
@@ -240,9 +245,16 @@ contract ZtdxRewardRouter is
         uint256 userCount = 0;
 
         for (uint256 i = 0; i < users.length; i++) {
+            // Strictly ascending order rejects duplicate recipients within one batch
+            if (i > 0 && users[i] <= users[i - 1]) {
+                revert UsersNotStrictlyAscending(i);
+            }
             if (amounts[i] > 0 && users[i] != address(0)) {
                 // Update claimed amount
                 redeemedRewards[users[i]] += amounts[i];
+
+                // Invalidate any outstanding redeemReward signature for this user
+                rewardNonces[users[i]] += 1;
 
                 // Transfer USDT to user
                 settlementToken.safeTransfer(users[i], amounts[i]);
@@ -271,7 +283,10 @@ contract ZtdxRewardRouter is
      * @param _referralStorage Referral storage contract address
      */
     function setAffiliateRegistry(address _referralStorage) external onlyOwner {
+        if (_referralStorage == address(0)) revert ZeroAddress();
+        address oldRegistry = address(affiliateRegistry);
         affiliateRegistry = IAffiliateRegistry(_referralStorage);
+        emit AffiliateRegistryChanged(oldRegistry, _referralStorage);
     }
 
     // ==================== Query Functions ====================

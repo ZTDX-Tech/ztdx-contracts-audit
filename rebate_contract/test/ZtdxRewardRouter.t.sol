@@ -16,6 +16,7 @@ contract ZtdxRewardRouterTest is Test {
     event RewardRedeemed(address indexed user, uint256 amount, uint256 nonce);
     event RewardBatchSettled(uint256 indexed batchId, uint256 totalAmount, uint256 userCount);
     event AuthorizationSignerChanged(address indexed oldSigner, address indexed newSigner);
+    event AffiliateRegistryChanged(address indexed oldRegistry, address indexed newRegistry);
 
     ZtdxRewardRouter router;
     MockUSDT usdt;
@@ -224,7 +225,7 @@ contract ZtdxRewardRouterTest is Test {
 
     function test_BatchSettle_SkipsZeroAmountsAndZeroAddress() public {
         address[] memory u = new address[](3);
-        u[0] = alice; u[1] = address(0); u[2] = bob;
+        u[0] = address(0); u[1] = alice; u[2] = bob;
         uint256[] memory a = new uint256[](3);
         a[0] = 100 ether; a[1] = 100 ether; a[2] = 0;
         vm.expectEmit(true, false, false, true);
@@ -234,6 +235,60 @@ contract ZtdxRewardRouterTest is Test {
         assertEq(usdt.balanceOf(alice), 100 ether);
         assertEq(usdt.balanceOf(bob), 0);
         assertEq(router.redeemedRewards(alice), 100 ether);
+    }
+
+    function test_BatchSettle_SameBatchIdReverts() public {
+        address[] memory u = new address[](1);
+        u[0] = alice;
+        uint256[] memory a = new uint256[](1);
+        a[0] = 1 ether;
+        vm.startPrank(owner);
+        router.batchSettleRewards(u, a, 9);
+        vm.expectRevert(abi.encodeWithSelector(ZtdxRewardRouter.BatchAlreadySettled.selector, 9));
+        router.batchSettleRewards(u, a, 9);
+        vm.stopPrank();
+    }
+
+    // ============ ZTD-09: duplicate recipients rejected ============
+
+    function test_BatchSettle_DuplicateUserReverts() public {
+        address[] memory u = new address[](2);
+        u[0] = alice; u[1] = alice;
+        uint256[] memory a = new uint256[](2);
+        a[0] = 1 ether; a[1] = 1 ether;
+        vm.prank(owner);
+        vm.expectRevert(abi.encodeWithSelector(ZtdxRewardRouter.UsersNotStrictlyAscending.selector, 1));
+        router.batchSettleRewards(u, a, 1);
+    }
+
+    function test_BatchSettle_UnsortedUsersReverts() public {
+        address[] memory u = new address[](2);
+        u[0] = bob; u[1] = alice;
+        uint256[] memory a = new uint256[](2);
+        a[0] = 1 ether; a[1] = 1 ether;
+        vm.prank(owner);
+        vm.expectRevert(abi.encodeWithSelector(ZtdxRewardRouter.UsersNotStrictlyAscending.selector, 1));
+        router.batchSettleRewards(u, a, 1);
+    }
+
+    // ============ ZTD-14: batch settlement invalidates outstanding signatures ============
+
+    function test_BatchSettle_InvalidatesOutstandingRedeemSignature() public {
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes memory sig = _signRedeem(alice, 100 ether, 0, deadline);
+
+        address[] memory u = new address[](1);
+        u[0] = alice;
+        uint256[] memory a = new uint256[](1);
+        a[0] = 100 ether;
+        vm.prank(owner);
+        router.batchSettleRewards(u, a, 1);
+        assertEq(router.rewardNonces(alice), 1);
+
+        vm.prank(alice);
+        vm.expectRevert(ZtdxRewardRouter.InvalidSignature.selector);
+        router.redeemReward(100 ether, deadline, sig);
+        assertEq(usdt.balanceOf(alice), 100 ether);
     }
 
     // ============ admin ============
@@ -255,6 +310,25 @@ contract ZtdxRewardRouterTest is Test {
         vm.prank(owner);
         vm.expectRevert(ZtdxRewardRouter.ZeroAddress.selector);
         router.setAuthorizationSigner(address(0));
+    }
+
+    function test_SetAffiliateRegistry_ZeroReverts() public {
+        vm.prank(owner);
+        vm.expectRevert(ZtdxRewardRouter.ZeroAddress.selector);
+        router.setAffiliateRegistry(address(0));
+    }
+
+    function test_SetAffiliateRegistry_OwnerOnly_EmitsEvent() public {
+        address newRegistry = address(0xFEED);
+        vm.expectEmit(true, true, false, false, address(router));
+        emit AffiliateRegistryChanged(address(0), newRegistry);
+        vm.prank(owner);
+        router.setAffiliateRegistry(newRegistry);
+        assertEq(address(router.affiliateRegistry()), newRegistry);
+
+        vm.prank(alice);
+        vm.expectRevert();
+        router.setAffiliateRegistry(newRegistry);
     }
 
     // ============ upgrade auth ============

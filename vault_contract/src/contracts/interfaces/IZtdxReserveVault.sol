@@ -12,7 +12,7 @@ interface IZtdxReserveVault {
     /// @notice Emitted when a user deposits USDT
     /// @param user The address of the user
     /// @param amount The amount of USDT deposited (in USDT decimals)
-    /// @param referralCode The referral code used (if any)
+    /// @param referralCode The referral code bound to the user in the registry (zero if none)
     event AccountFunded(
         address indexed user,
         uint256 amount,
@@ -74,6 +74,16 @@ interface IZtdxReserveVault {
     /// @param multisig The multisig address
     /// @param amount The amount withdrawn
     event PartnerLedgerSettled(address indexed multisig, uint256 amount);
+
+    /// @notice Emitted when the affiliate registry is replaced
+    /// @param oldRegistry The previous registry address
+    /// @param newRegistry The new registry address
+    event AffiliateRegistryChanged(address indexed oldRegistry, address indexed newRegistry);
+
+    /// @notice Emitted when the limits on releases above recorded principal are updated
+    /// @param txLimit The new per-transaction limit (0 = unlimited)
+    /// @param windowLimit The new per-window limit (0 = unlimited)
+    event ExcessReleaseLimitsChanged(uint256 txLimit, uint256 windowLimit);
 
     // ==================== Functions ====================
 
@@ -176,7 +186,7 @@ interface IZtdxReserveVault {
     /// @notice Total deposits
     function aggregateFunding() external view returns (uint256);
 
-    /// @notice Total withdrawals
+    /// @notice Total user withdrawals via releaseFunds (excludes partner settlements)
     function aggregateReleases() external view returns (uint256);
 
     /// @notice EIP-712 domain separator

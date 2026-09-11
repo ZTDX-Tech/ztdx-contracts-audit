@@ -62,6 +62,7 @@ contract AffiliateRegistry is Initializable, IAffiliateRegistry, AccessControlUp
     error InvalidTotalRebate(uint256 totalRebate);
     error ZeroAddress();
     error ZeroCode();
+    error TierNotConfigured(uint256 tierId);
 
     // ==================== Initialization ====================
 
@@ -141,6 +142,7 @@ contract AffiliateRegistry is Initializable, IAffiliateRegistry, AccessControlUp
 
         _tierTotalRebates[_tierId] = _totalRebate;
         _tierDiscountShares[_tierId] = _discountShare;
+        _configuredTiers[_tierId] = true;
 
         emit AffiliateTierConfigured(_tierId, _totalRebate, _discountShare);
     }
@@ -156,6 +158,7 @@ contract AffiliateRegistry is Initializable, IAffiliateRegistry, AccessControlUp
         onlyRole(ADMIN_ROLE)
     {
         if (_referrer == address(0)) revert ZeroAddress();
+        if (!isTierConfigured(_tierId)) revert TierNotConfigured(_tierId);
 
         _referrerTiers[_referrer] = _tierId;
         emit AffiliateTierAssigned(_referrer, _tierId);
@@ -179,19 +182,21 @@ contract AffiliateRegistry is Initializable, IAffiliateRegistry, AccessControlUp
 
     /**
      * @notice Grant handler role to a contract (reserveVault/rebate)
+     * @dev Uses the internal grant so ADMIN_ROLE alone can manage handlers
      * @param _handler The address of the handler contract
      */
     function authorizeHandler(address _handler) external onlyRole(ADMIN_ROLE) {
         if (_handler == address(0)) revert ZeroAddress();
-        grantRole(HANDLER_ROLE, _handler);
+        _grantRole(HANDLER_ROLE, _handler);
     }
 
     /**
      * @notice Revoke handler role from a contract
+     * @dev Uses the internal revoke so ADMIN_ROLE alone can manage handlers
      * @param _handler The address of the handler contract
      */
     function removeHandler(address _handler) external onlyRole(ADMIN_ROLE) {
-        revokeRole(HANDLER_ROLE, _handler);
+        _revokeRole(HANDLER_ROLE, _handler);
     }
 
     // ==================== Governance Functions ====================
@@ -286,9 +291,22 @@ contract AffiliateRegistry is Initializable, IAffiliateRegistry, AccessControlUp
         }
     }
 
+    /**
+     * @notice Whether a tier has been configured
+     * @dev Tiers configured before the flag existed are recognized by a non-zero total rebate
+     * @param _tierId The tier level
+     * @return True if the tier can be assigned
+     */
+    function isTierConfigured(uint256 _tierId) public view returns (bool) {
+        return _configuredTiers[_tierId] || _tierTotalRebates[_tierId] != 0;
+    }
+
     function _authorizeUpgrade(address newImplementation) internal override onlyRole(DEFAULT_ADMIN_ROLE) {
         if (newImplementation == address(0)) revert ZeroAddress();
     }
 
-    uint256[50] private __gap;
+    /// @notice Tier IDs set via configureTier, appended for upgrade-safe storage layout
+    mapping(uint256 => bool) private _configuredTiers;
+
+    uint256[49] private __gap;
 }

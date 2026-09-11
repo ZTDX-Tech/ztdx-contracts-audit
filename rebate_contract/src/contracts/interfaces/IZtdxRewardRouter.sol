@@ -37,6 +37,11 @@ interface IZtdxRewardRouter {
         address indexed newSigner
     );
 
+    /// @notice Emitted when the affiliate registry is replaced
+    /// @param oldRegistry The previous registry address
+    /// @param newRegistry The new registry address
+    event AffiliateRegistryChanged(address indexed oldRegistry, address indexed newRegistry);
+
     // ==================== Functions ====================
 
     /// @notice Claim rebate (requires backend signature)

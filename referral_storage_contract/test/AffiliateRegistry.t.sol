@@ -171,11 +171,32 @@ contract AffiliateRegistryTest is Test {
     // ============ assignAffiliateTier + custom share ============
 
     function test_AssignAffiliateTier_HappyPath() public {
+        vm.prank(admin);
+        registry.configureTier(3, 1000, 5000);
+
         vm.expectEmit(true, true, false, false);
         emit AffiliateTierAssigned(alice, 3);
         vm.prank(admin);
         registry.assignAffiliateTier(alice, 3);
         assertEq(registry.affiliateTiers(alice), 3);
+    }
+
+    // ============ ZTD-08: only configured tiers can be assigned ============
+
+    function test_AssignAffiliateTier_UnconfiguredReverts() public {
+        vm.prank(admin);
+        vm.expectRevert(abi.encodeWithSelector(AffiliateRegistry.TierNotConfigured.selector, 5));
+        registry.assignAffiliateTier(alice, 5);
+    }
+
+    function test_AssignAffiliateTier_ZeroRateTierAllowedOnceConfigured() public {
+        assertFalse(registry.isTierConfigured(2));
+        vm.startPrank(admin);
+        registry.configureTier(2, 0, 0);
+        registry.assignAffiliateTier(alice, 2);
+        vm.stopPrank();
+        assertTrue(registry.isTierConfigured(2));
+        assertEq(registry.affiliateTiers(alice), 2);
     }
 
     function test_SetAffiliateDiscountShare_ValidatesRange() public {
@@ -202,6 +223,30 @@ contract AffiliateRegistryTest is Test {
         vm.prank(admin);
         vm.expectRevert(AffiliateRegistry.ZeroAddress.selector);
         registry.authorizeHandler(address(0));
+    }
+
+    // ============ ZTD-13: ADMIN_ROLE alone can manage handlers ============
+
+    function test_HandlerHelpers_WorkWithOnlyAdminRole() public {
+        bytes32 adminRole = registry.ADMIN_ROLE();
+        bytes32 handlerRole = registry.HANDLER_ROLE();
+        vm.prank(admin);
+        registry.grantRole(adminRole, carol);
+        assertFalse(registry.hasRole(registry.DEFAULT_ADMIN_ROLE(), carol));
+
+        vm.prank(carol);
+        registry.authorizeHandler(bob);
+        assertTrue(registry.hasRole(handlerRole, bob));
+
+        vm.prank(carol);
+        registry.removeHandler(bob);
+        assertFalse(registry.hasRole(handlerRole, bob));
+    }
+
+    function test_HandlerHelpers_RejectNonAdmin() public {
+        vm.prank(alice);
+        vm.expectRevert();
+        registry.authorizeHandler(bob);
     }
 
     // ============ governance: adminTransferCodeOwner ============

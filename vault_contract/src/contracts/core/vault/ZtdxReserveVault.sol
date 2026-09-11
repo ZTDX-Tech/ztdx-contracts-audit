@@ -41,6 +41,9 @@ contract ZtdxReserveVault is
         "ReleaseFunds(address account,uint256 value,uint256 nonce,uint256 deadline)"
     );
 
+    /// @notice Length of the window used by the excess release limit
+    uint256 public constant EXCESS_RELEASE_WINDOW = 1 days;
+
     // ==================== State Variables ====================
 
     /// @notice USDT token contract
@@ -73,7 +76,8 @@ contract ZtdxReserveVault is
     /// @notice Total deposits (in USDT decimals)
     uint256 public override aggregateFunding;
 
-    /// @notice Total withdrawals (in USDT decimals)
+    /// @notice Total user withdrawals via releaseFunds (in USDT decimals)
+    /// @dev Excludes partner settlements, which are tracked in partnerLedgerDebits
     uint256 public override aggregateReleases;
 
     /// @notice Minimum fundAccount amount (in USDT decimals)
@@ -116,6 +120,12 @@ contract ZtdxReserveVault is
 
     /// @notice Thrown when domain version is empty
     error EmptyDomainVersion();
+
+    /// @notice Thrown when the amount released above principal exceeds the per-transaction limit
+    error ExcessReleaseAboveTxLimit(uint256 excess, uint256 limit);
+
+    /// @notice Thrown when the amount released above principal exceeds the remaining window allowance
+    error ExcessReleaseAboveWindowLimit(uint256 excess, uint256 remaining);
 
     // ==================== Initialization ====================
 
@@ -219,12 +229,13 @@ contract ZtdxReserveVault is
         fundedTotals[msg.sender] += actualAmount;
         aggregateFunding += actualAmount;
 
-        // Set referral code if provided and not already set
+        // Set referral code if provided and not already set; emit the code actually bound in the registry
+        bytes32 effectiveCode;
         if (referralCode != bytes32(0) && address(affiliateRegistry) != address(0)) {
-            _setReferralCode(msg.sender, referralCode);
+            effectiveCode = _setReferralCode(msg.sender, referralCode);
         }
 
-        emit AccountFunded(msg.sender, actualAmount, referralCode);
+        emit AccountFunded(msg.sender, actualAmount, effectiveCode);
     }
 
     // ==================== Withdrawal Functions ====================
@@ -272,10 +283,13 @@ contract ZtdxReserveVault is
         }
 
         // Update balance (Checks-Effects-Interactions pattern)
+        // _balances only tracks on-chain principal; the backend may authorize more (realized PnL,
+        // referral commissions), so the portion above principal is bounded by the excess release limits
         uint256 userBalance = _balances[msg.sender];
         if (userBalance >= amount) {
             _balances[msg.sender] = userBalance - amount;
         } else {
+            _consumeExcessReleaseAllowance(amount - userBalance);
             _balances[msg.sender] = 0;
         }
         aggregateReleases += amount;
@@ -434,34 +448,61 @@ contract ZtdxReserveVault is
      * @dev Only sets if user doesn't already have a code and code is valid
      * @param user User address
      * @param code Referral code
+     * @return effectiveCode The code bound to the user in the registry after the call (zero if none)
      */
-    function _setReferralCode(address user, bytes32 code) internal {
+    function _setReferralCode(address user, bytes32 code) internal returns (bytes32 effectiveCode) {
         if (address(affiliateRegistry) == address(0)) {
-            return; // Silently return if referral storage not set
+            return bytes32(0); // Silently return if referral storage not set
         }
         if (code == bytes32(0)) {
-            return; // Silently return if code is zero
+            return bytes32(0); // Silently return if code is zero
         }
 
         // Check if user already has a referral code
         bytes32 existingCode = affiliateRegistry.traderCodeOf(user);
         if (existingCode != bytes32(0)) {
-            return; // User already has a code
+            return existingCode; // User already has a code
         }
 
         // Check if referral code exists and get owner
         address codeOwner = affiliateRegistry.codeOwnerOf(code);
         if (codeOwner == address(0)) {
-            return; // Code doesn't exist
+            return bytes32(0); // Code doesn't exist
         }
         if (codeOwner == user) {
-            return; // User cannot use their own code
+            return bytes32(0); // User cannot use their own code
         }
 
         // Set the referral code
         affiliateRegistry.attachTraderCode(user, code);
 
         emit AffiliateCodeBound(user, code, codeOwner);
+        return code;
+    }
+
+    /**
+     * @notice Enforce and record the allowance for releases above recorded principal
+     * @dev Uses fixed windows of EXCESS_RELEASE_WINDOW; a new window starts on the first excess release after expiry
+     * @param excess Amount released above the caller's recorded principal
+     */
+    function _consumeExcessReleaseAllowance(uint256 excess) internal {
+        uint256 txLimit = excessReleaseTxLimit;
+        if (txLimit != 0 && excess > txLimit) {
+            revert ExcessReleaseAboveTxLimit(excess, txLimit);
+        }
+
+        if (block.timestamp >= excessReleaseWindowStart + EXCESS_RELEASE_WINDOW) {
+            excessReleaseWindowStart = block.timestamp;
+            excessReleasedInWindow = 0;
+        }
+
+        uint256 releasedInWindow = excessReleasedInWindow;
+        uint256 windowLimit = excessReleaseWindowLimit;
+        if (windowLimit != 0 && releasedInWindow + excess > windowLimit) {
+            uint256 remaining = releasedInWindow >= windowLimit ? 0 : windowLimit - releasedInWindow;
+            revert ExcessReleaseAboveWindowLimit(excess, remaining);
+        }
+        excessReleasedInWindow = releasedInWindow + excess;
     }
 
     // ==================== Admin Functions ====================
@@ -482,23 +523,26 @@ contract ZtdxReserveVault is
      * @param _referralStorage Referral storage contract address
      */
     function setAffiliateRegistry(address _referralStorage) external onlyOwner {
+        if (_referralStorage == address(0)) revert ZeroAddress();
+        address oldRegistry = address(affiliateRegistry);
         affiliateRegistry = IAffiliateRegistry(_referralStorage);
+        emit AffiliateRegistryChanged(oldRegistry, _referralStorage);
     }
 
     /**
      * @notice Pause the contract (emergency only)
+     * @dev Paused is emitted by PausableUpgradeable
      */
     function pause() external onlyOwner {
         _pause();
-        emit Paused(msg.sender);
     }
 
     /**
      * @notice Unpause the contract
+     * @dev Unpaused is emitted by PausableUpgradeable
      */
     function unpause() external onlyOwner {
         _unpause();
-        emit Unpaused(msg.sender);
     }
 
     /**
@@ -536,6 +580,18 @@ contract ZtdxReserveVault is
         emit MinimumReleaseChanged(_minWithdraw);
     }
 
+    /**
+     * @notice Set limits on the portion of releases above the caller's recorded principal
+     * @dev Zero disables the corresponding limit
+     * @param txLimit Maximum excess per releaseFunds call (in USDT decimals)
+     * @param windowLimit Maximum cumulative excess per EXCESS_RELEASE_WINDOW (in USDT decimals)
+     */
+    function setExcessReleaseLimits(uint256 txLimit, uint256 windowLimit) external onlyOwner {
+        excessReleaseTxLimit = txLimit;
+        excessReleaseWindowLimit = windowLimit;
+        emit ExcessReleaseLimitsChanged(txLimit, windowLimit);
+    }
+
     function _authorizeUpgrade(address newImplementation) internal override onlyOwner {
         if (newImplementation == address(0)) revert ZeroAddress();
     }
@@ -543,5 +599,17 @@ contract ZtdxReserveVault is
     /// @notice EIP-712 Domain version, appended for upgrade-safe storage layout
     string public domainVersion;
 
-    uint256[49] private __gap;
+    /// @notice Max amount above recorded principal per releaseFunds call (0 = unlimited), appended for upgrade-safe storage layout
+    uint256 public excessReleaseTxLimit;
+
+    /// @notice Max cumulative amount above recorded principal per window (0 = unlimited)
+    uint256 public excessReleaseWindowLimit;
+
+    /// @notice Start timestamp of the current excess release window
+    uint256 public excessReleaseWindowStart;
+
+    /// @notice Cumulative amount above recorded principal released in the current window
+    uint256 public excessReleasedInWindow;
+
+    uint256[45] private __gap;
 }
